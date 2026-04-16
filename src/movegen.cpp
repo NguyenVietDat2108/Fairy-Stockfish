@@ -27,7 +27,9 @@ namespace {
 
   template<MoveType T>
   ExtMove* make_move_and_gating(const Position& pos, ExtMove* moveList, Color us, Square from, Square to, PieceType pt = NO_PIECE_TYPE) {
-
+    if (pos.variant()->aliceTeleportation && pos.piece_on(Square(int(to) ^ 64)) != NO_PIECE) {
+        return moveList; 
+    }
     // Wall placing moves
     //if it's "wall or move", and they chose non-null move, skip even generating wall move
     if (pos.walling() && !(pos.wall_or_move() && (from!=to)))
@@ -81,7 +83,6 @@ namespace {
             if (pos.can_drop(us, pt_gating) && (pos.drop_region(us, pt_gating) & to))
                 *moveList++ = make_gating<T>(from, to, pt_gating, to);
         }
-
     return moveList;
   }
 

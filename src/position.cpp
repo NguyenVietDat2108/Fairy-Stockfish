@@ -280,6 +280,8 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
 
   Rank r = max_rank();
   Square sq = SQ_A1 + r * NORTH;
+  
+  bool onBoardB = false; // ALICE CHESS: Track which board we are placing pieces on
 
   // 1. Piece placement
   while ((ss >> token) && !isspace(token))
@@ -303,6 +305,14 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
               break;
       }
 
+      // --- ALICE CHESS DIMENSION TOGGLE ---
+      else if (token == '~' && var->aliceTeleportation)
+      {
+          onBoardB = !onBoardB; // Flip dimension
+          continue;             // Do not advance the 'sq' coordinate
+      }
+      // ------------------------------------
+
       // Stop before pieces in hand
       else if (token == '[')
           break;
@@ -321,9 +331,19 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
 
       else if ((idx = piece_to_char().find(token)) != string::npos || (idx = piece_to_char_synonyms().find(token)) != string::npos)
       {
-          if (ss.peek() == '~')
+          bool isPromoted = false;
+          
+          // CRITICAL: Prevent Alice Chess from confusing the board toggle '~' with a piece promotion
+          if (ss.peek() == '~' && !var->aliceTeleportation)
+          {
               ss >> token;
-          put_piece(Piece(idx), sq, token == '~');
+              isPromoted = true;
+          }
+          
+          // Push piece to Board B (sq ^ 64) if the toggle is active
+          Square targetSq = (var->aliceTeleportation && onBoardB) ? Square(int(sq) ^ 64) : sq;
+          
+          put_piece(Piece(idx), targetSq, isPromoted);
           ++sq;
       }
 
@@ -331,7 +351,11 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
       else if (token == '+' && (idx = piece_to_char().find(ss.peek())) != string::npos && promoted_piece_type(type_of(Piece(idx))))
       {
           ss >> token;
-          put_piece(make_piece(color_of(Piece(idx)), promoted_piece_type(type_of(Piece(idx)))), sq, true, Piece(idx));
+          
+          // Support for Alice Chess dimension targeting
+         Square targetSq = (var->aliceTeleportation && onBoardB) ? Square(int(sq) ^ 64) : sq;
+          
+          put_piece(make_piece(color_of(Piece(idx)), promoted_piece_type(type_of(Piece(idx)))), targetSq, true, Piece(idx));
           ++sq;
       }
   }
@@ -539,7 +563,14 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
           st->checksRemaining[BLACK] = CheckCount(std::max(3 - (token - '0'), 0));
       }
   }
-
+  st->freezeCooldown[WHITE] = 0;
+  st->freezeCooldown[BLACK] = 0;
+  st->jumpCooldown[WHITE] = 0;
+  st->jumpCooldown[BLACK] = 0;
+  st->activeFreezeZone = 0ULL;
+  st->activeJumpPiece = SQ_NONE;
+  st->spellJustCasted = false;
+    
   chess960 = isChess960 || v->chess960;
   tsumeMode = Options["TsumeMode"];
   thisThread = th;
@@ -930,8 +961,15 @@ Bitboard Position::slider_blockers(Bitboard sliders, Square s, Bitboard& pinners
 /// given square. Slider attacks use the occupied bitboard to indicate occupancy.
 
 Bitboard Position::attackers_to(Square s, Bitboard occupied, Color c, Bitboard janggiCannons) const {
-
+    
+  if (var->spellChessRules && st->activeJumpPiece != SQ_NONE) {
+      occupied &= ~square_bb(st->activeJumpPiece);
+  }
   // Use a faster version for variants with moderate rule variations
+  if (var->aliceTeleportation) {
+      Bitboard aliceMask = (s < 64) ? ~Bitboard(0) >> 64 : ~Bitboard(0) << 64;
+      occupied &= aliceMask;
+  }
   if (var->fastAttacks)
   {
       return  (pawn_attacks_bb(~c, s)          & pieces(c, PAWN))
@@ -999,7 +1037,13 @@ Bitboard Position::attackers_to(Square s, Bitboard occupied, Color c, Bitboard j
   // Unpromoted soldiers
   if (b & pieces(SOLDIER) && relative_rank(c, s, max_rank()) < var->soldierPromotionRank)
       b ^= b & pieces(SOLDIER) & ~PseudoAttacks[~c][SHOGI_PAWN][s];
-
+  if (var->spellChessRules && st->activeFreezeZone) {
+      b &= ~st->activeFreezeZone;
+  }
+    if (var->aliceTeleportation) {
+      Bitboard aliceMask = (s < 64) ? ~Bitboard(0) >> 64 : ~Bitboard(0) << 64;
+      return b & aliceMask;
+  }
   return b;
 }
 
@@ -1058,7 +1102,17 @@ bool Position::legal(Move m) const {
   assert(color_of(moved_piece(m)) == us);
   assert(!count<KING>(us) || piece_on(square<KING>(us)) == make_piece(us, KING));
   assert(board_bb() & to);
-
+  if (var->spellChessRules) {
+      if (type_of(m) != DROP && (st->activeFreezeZone & square_bb(from))) {
+          return false; 
+      }
+      if (type_of(m) == DROP) {
+          PieceType pt = in_hand_piece_type(m);
+          // Block the spell cast if the cooldown timer hasn't reached 0
+          if (pt == FREEZE_SPELL && st->freezeCooldown[us] > 0) return false;
+          if (pt == JUMP_SPELL && st->jumpCooldown[us] > 0) return false;
+      }
+  }
   // Illegal checks
   if ((!checking_permitted() || (sittuyin_promotion() && type_of(m) == PROMOTION) || (!drop_checks() && type_of(m) == DROP)) && gives_check(m))
       return false;
@@ -1559,7 +1613,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   newSt.previous = st;
   st = &newSt;
   st->move = m;
-
+  st->spellJustCasted = false;
   // Increment ply counters. In particular, rule50 will be reset to zero later on
   // in case of a capture or a pawn move.
   ++gamePly;
@@ -1758,46 +1812,64 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       }
   }
 
-  // Move the piece. The tricky Chess960 castling is handled earlier
+// Move the piece. The tricky Chess960 castling is handled earlier
   if (type_of(m) == DROP)
   {
-      if (Eval::useNNUE)
-      {
-          // Add drop piece
-          dp.piece[0] = pc;
-          dp.handPiece[0] = make_piece(us, in_hand_piece_type(m));
-          dp.handCount[0] = pieceCountInHand[us][in_hand_piece_type(m)];
-          dp.from[0] = SQ_NONE;
-          dp.to[0] = to;
-      }
-
-      drop_piece(make_piece(us, in_hand_piece_type(m)), pc, to);
-      st->materialKey ^= Zobrist::psq[pc][pieceCount[pc]-1];
-      if (type_of(pc) != PAWN)
-          st->nonPawnMaterial[us] += PieceValue[MG][pc];
-      // Set castling rights for dropped king or rook
-      if (castling_dropped_piece() && rank_of(to) == castling_rank(us))
-      {
-          if (type_of(pc) == castling_king_piece(us) && file_of(to) == castling_king_file())
-          {
-              st->castlingKingSquare[us] = to;
-              Bitboard castling_rooks =  pieces(us)
-                                       & rank_bb(castling_rank(us))
-                                       & (file_bb(FILE_A) | file_bb(max_file()));
-              while (castling_rooks)
-              {
-                  Square s = pop_lsb(castling_rooks);
-                  if (castling_rook_pieces(us) & type_of(piece_on(s)))
-                      set_castling_right(us, s);
-              }
+      PieceType pt = in_hand_piece_type(m);
+      
+      // --- SPELL CHESS INTERCEPTION ---
+      if (var->spellChessRules && (pt == FREEZE_SPELL || pt == JUMP_SPELL)) {
+          remove_from_hand(make_piece(us, pt));
+          
+          if (pt == FREEZE_SPELL) {
+              st->activeFreezeZone = attacks_bb<KING>(to) | to; // 3x3 Area
+              st->freezeCooldown[us] = 3;
+          } else if (pt == JUMP_SPELL) {
+              st->activeJumpPiece = to;
+              st->jumpCooldown[us] = 3;
           }
-          else if (castling_rook_pieces(us) & type_of(pc))
+          
+          st->spellJustCasted = true;
+          // We skip drop_piece() and material updates because spells aren't physical pieces!
+      } 
+      // --------------------------------
+      else {
+          // Standard piece drop (e.g., Crazyhouse pawn)
+          if (Eval::useNNUE)
           {
-              if (   (file_of(to) == FILE_A || file_of(to) == max_file())
-                  && piece_on(make_square(castling_king_file(), castling_rank(us))) == make_piece(us, castling_king_piece(us)))
+              dp.piece[0] = pc;
+              dp.handPiece[0] = make_piece(us, pt);
+              dp.handCount[0] = pieceCountInHand[us][pt];
+              dp.from[0] = SQ_NONE;
+              dp.to[0] = to;
+          }
+
+          drop_piece(make_piece(us, pt), pc, to);
+          st->materialKey ^= Zobrist::psq[pc][pieceCount[pc]-1];
+          if (type_of(pc) != PAWN)
+              st->nonPawnMaterial[us] += PieceValue[MG][pc];
+              
+          if (castling_dropped_piece() && rank_of(to) == castling_rank(us))
+          {
+              if (type_of(pc) == castling_king_piece(us) && file_of(to) == castling_king_file())
               {
-                  st->castlingKingSquare[us] = make_square(castling_king_file(), castling_rank(us));
-                  set_castling_right(us, to);
+                  st->castlingKingSquare[us] = to;
+                  Bitboard castling_rooks =  pieces(us) & rank_bb(castling_rank(us)) & (file_bb(FILE_A) | file_bb(max_file()));
+                  while (castling_rooks)
+                  {
+                      Square s = pop_lsb(castling_rooks);
+                      if (castling_rook_pieces(us) & type_of(piece_on(s)))
+                          set_castling_right(us, s);
+                  }
+              }
+              else if (castling_rook_pieces(us) & type_of(pc))
+              {
+                  if (   (file_of(to) == FILE_A || file_of(to) == max_file())
+                      && piece_on(make_square(castling_king_file(), castling_rank(us))) == make_piece(us, castling_king_piece(us)))
+                  {
+                      st->castlingKingSquare[us] = make_square(castling_king_file(), castling_rank(us));
+                      set_castling_right(us, to);
+                  }
               }
           }
       }
@@ -1811,7 +1883,14 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
           dp.to[0] = to;
       }
 
-      move_piece(from, to);
+      if (var->aliceTeleportation) {
+          Piece pc = piece_on(to);
+          remove_piece(to);            
+          put_piece(pc, Square(int(to) ^ 64));
+        }
+       else {
+      move_piece(from, to);        // Standard movement
+  }
   }
 
   // If the moving piece is a pawn do some special extra work
@@ -2087,13 +2166,29 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       k ^= Zobrist::wall[gating_square(m)];
   }
 
+  if (st->spellJustCasted) {
+      k ^= Zobrist::side; // Revert the side-to-move hash XOR, since the turn didn't change
+  }
+  // ----------------------------
+
   // Update the key with the final value
   st->key = k;
   // Calculate checkers bitboard (if move gives check)
   st->checkersBB = givesCheck ? attackers_to(square<KING>(them), us) & pieces(us) : Bitboard(0);
   assert(givesCheck == bool(st->checkersBB));
 
-  sideToMove = ~sideToMove;
+  // --- SPELL CHESS TURN LOGIC ---
+  if (!st->spellJustCasted) {
+      sideToMove = ~sideToMove; // Normal turn flip
+      
+      // Tick down cooldowns
+      if (st->freezeCooldown[us] > 0) st->freezeCooldown[us]--;
+      if (st->jumpCooldown[us] > 0) st->jumpCooldown[us]--;
+
+      // Clear the active spells so they don't affect the opponent's turn
+      st->activeFreezeZone = 0ULL;
+      st->activeJumpPiece = SQ_NONE;
+  }
 
   if (counting_rule())
   {
@@ -2143,7 +2238,9 @@ void Position::undo_move(Move m) {
 
   assert(is_ok(m));
 
-  sideToMove = ~sideToMove;
+  if (!st->spellJustCasted) {
+      sideToMove = ~sideToMove;
+  }
 
   Color us = sideToMove;
   Square from = from_sq(m);
@@ -2226,10 +2323,24 @@ void Position::undo_move(Move m) {
   }
   else
   {
-      if (type_of(m) == DROP)
-          undrop_piece(make_piece(us, in_hand_piece_type(m)), to); // Remove the dropped piece
-      else
-          move_piece(to, from); // Put the piece back at the source square
+      if (type_of(m) == DROP) {
+          PieceType pt = in_hand_piece_type(m);
+          
+          // --- SPELL CHESS UNDO ---
+          if (var->spellChessRules && (pt == FREEZE_SPELL || pt == JUMP_SPELL)) {
+              add_to_hand(make_piece(us, pt)); // Just return the token to the pocket
+          } else {
+              undrop_piece(make_piece(us, pt), to); // Remove the standard dropped piece
+          }
+          // ------------------------
+      }
+      else if (var->aliceTeleportation) {
+      Piece pc = piece_on(Square(int(to) ^ 64));
+        remove_piece(Square(int(to) ^ 64));
+      remove_piece(Square(int(to) ^ 64));        // Put it back on its starting square on Board A
+      } 
+      else {move_piece(to, from);  // Put the piece back at the source square
+    }
 
       if (st->capturedPiece)
       {

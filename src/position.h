@@ -56,7 +56,11 @@ struct StateInfo {
   Square castlingKingSquare[COLOR_NB];
   Bitboard wallSquares;
   Bitboard gatesBB[COLOR_NB];
-
+  int      freezeCooldown[COLOR_NB];
+  int      jumpCooldown[COLOR_NB];
+  Bitboard activeFreezeZone;
+  Square   activeJumpPiece;
+  bool     spellJustCasted;
   // Not copied when making a move (will be recomputed anyhow)
   Key        key;
   Bitboard   checkersBB;

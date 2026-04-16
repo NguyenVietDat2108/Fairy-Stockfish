@@ -172,6 +172,30 @@ namespace {
         v->countingRule = MAKRUK_COUNTING;
         return v;
     }
+    //Alice chess
+    Variant* alice_variant() {
+        Variant* v = chess_variant()->init();
+        v->twoBoards = true;
+        v->enPassantTypes[WHITE] = NO_PIECE_SET;
+	v->enPassantTypes[BLACK] = NO_PIECE_SET;
+        
+        v->aliceTeleportation = true; // Turn on the physics flag
+        
+        return v;
+    }
+
+    // Spell Chess
+    Variant* spell_variant() {
+        Variant* v = chess_variant()->init();
+        v->pieceDrops = true;
+        v->add_piece(JUMP_SPELL, 'j');
+        v->add_piece(FREEZE_SPELL, 'f');
+        v->startFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR[JJFFFFFjjfffff] w KQkq - 0 1";
+        
+        v->spellChessRules = true; // Turn on the mechanics flag
+        
+        return v;
+    }
     // Makpong (Defensive Chess)
     // A Makruk variant used for tie-breaks
     // https://www.mayhematics.com/v/vol8/vc64b.pdf, p. 177
@@ -1915,6 +1939,7 @@ void VariantMap::init() {
     add("flipello", flipello_variant());
     add("minixiangqi", minixiangqi_variant());
     add("raazuvaa", raazuvaa_variant());
+    add("spell", spell_variant());
 #ifdef LARGEBOARDS
     add("shogi", shogi_variant());
     add("checkshogi", checkshogi_variant());
@@ -1942,6 +1967,7 @@ void VariantMap::init() {
     add("shako", shako_variant());
     add("clobber10", clobber10_variant());
     add("flipello10", flipello10_variant());
+    add("alice", alice_variant());
 #ifdef ALLVARS
     add("amazons", amazons_variant());
 #endif
