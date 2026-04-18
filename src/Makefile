@@ -376,7 +376,7 @@ ifeq ($(COMP),gcc)
 	endif
 
 	ifeq ($(arch),$(filter $(arch),armv7))
-		LDFLAGS += -latomic
+		LDFLAGS += 
 	endif
 
 	ifneq ($(KERNEL),Darwin)
@@ -423,7 +423,7 @@ ifeq ($(COMP),clang)
 	ifneq ($(KERNEL),Darwin)
 	ifneq ($(KERNEL),OpenBSD)
 	ifneq ($(KERNEL),FreeBSD)
-		LDFLAGS += -latomic
+		LDFLAGS += 
 	endif
 	endif
 	endif
@@ -460,7 +460,7 @@ ifeq ($(COMP),ndk)
 		CXX=aarch64-linux-android21-clang++
 		STRIP=aarch64-linux-android-strip
 	endif
-	LDFLAGS += -static-libstdc++ -pie -lm -latomic
+	LDFLAGS += -static-libstdc++ -pie -lm 
 endif
 
 ifeq ($(comp),icc)
@@ -541,7 +541,6 @@ ifeq ($(optimize),yes)
 	ifeq ($(comp),clang)
 		clangmajorversion = $(shell $(CXX) -dumpversion 2>/dev/null | cut -f1 -d.)
 		ifeq ($(shell expr $(clangmajorversion) \< 16),1)
-			CXXFLAGS += -fexperimental-new-pass-manager
 		endif
 	endif
 endif

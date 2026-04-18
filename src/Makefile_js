@@ -24,8 +24,8 @@ SRCS = ffishjs.cpp benchmark.cpp bitbase.cpp bitboard.cpp endgame.cpp evaluate.c
 	nnue/features/half_ka_v2_variants.cpp
 
 CXX=emcc
-CXXFLAGS += --bind -DNNUE_EMBEDDING_OFF -DNO_THREADS -std=c++17 -Wall
-
+CXXFLAGS += --bind -DNNUE_EMBEDDING_OFF -pthread -std=c++17 -Wall
+LDFLAGS += -pthread -s PTHREAD_POOL_SIZE=4
 largeboards = yes
 all = yes
 optimize = yes
