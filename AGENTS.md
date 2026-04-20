@@ -55,10 +55,28 @@ make -f Makefile_js build
 # Alternative: Install from npm
 npm install ffish
 ```
+# Alternatives: using MSYS2 MINGW64
 
+To compile the WebAssembly version of Fairy-Stockfish inside an MSYS2 MINGW64 (or UCRT64) environment, follow these instructions.
+
+### 1. Install Prerequisites
+Ensure you have `git`, `python`, `make`, and the C++ compilers installed. 
+If you do not have them, run the following command in your MSYS2 terminal:
+
+```bash
+pacman -Syu
+pacman -S git python make mingw-w64-x86_64-gcc mingw-w64-x86_64-clang
 ## Testing & Validation
 
 All test commands below assume the current directory is `src/`.
+Note: You must also have the Emscripten SDK (emsdk) installed and activated in your current terminal session so that emcc.bat is recognized.
+Direct to the src folder and run:
+make clean
+
+make -j4 build ARCH=general-32 COMP=clang COMPCXX=emcc.bat EXE=stockfish.js \
+  largeboards=yes all=yes nnue=no \
+  EXTRACXXFLAGS="-DNDEBUG -O3 -pthread -g3" \
+  EXTRALDFLAGS="-O2 -pthread -g3 -s ASYNCIFY=1 -s NO_EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=67108864 -s EXPORTED_FUNCTIONS=['_main','_malloc','_free'] -s EXPORTED_RUNTIME_METHODS=['stringToNewUTF8'] -s ENVIRONMENT=worker --pre-js pre.js -s ASSERTIONS=1 -s STACK_OVERFLOW_CHECK=2 -s PTHREAD_POOL_SIZE=32"
 
 ### Core Engine Tests
 ```bash
