@@ -35,7 +35,17 @@
 #include "syzygy/tbprobe.h"
 
 using namespace std;
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
 
+EM_JS(char*, get_queued_cmd, (), {
+    if (typeof self.cmd_queue !== 'undefined' && self.cmd_queue.length > 0) {
+        var str = self.cmd_queue.shift();
+        return Module.stringToNewUTF8(str); // Safely allocates string into C++
+    }
+    return 0; // Null pointer
+});
+#endif
 namespace Stockfish {
 
 extern vector<string> setup_bench(const Position&, istream&);
@@ -323,9 +333,24 @@ void UCI::loop(int argc, char* argv[]) {
           Options["VariantPath"] = std::string(envVariantPath);
   }
 
-  do {
-      if (argc == 1 && !getline(cin, cmd)) // Block here waiting for input or EOF
+do {
+#ifdef __EMSCRIPTEN__
+      if (argc == 1) {
+          char* js_str = nullptr;
+          while (true) {
+              js_str = get_queued_cmd(); // Check the JS inbox
+              if (js_str != nullptr) {
+                  break; // We got a command!
+              }
+              emscripten_sleep(10); // Sleep for 10ms and yield to the browser
+          }
+          cmd = std::string(js_str);
+          free(js_str); // Free the memory!
+      }
+#else
+      if (argc == 1 && !getline(cin, cmd))
           cmd = "quit";
+#endif
 
       istringstream is(cmd);
 
