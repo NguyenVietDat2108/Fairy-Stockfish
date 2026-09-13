@@ -1,5 +1,5 @@
 # ==============================================================================
-# Fairy-Stockfish UCI Engine WASM Makefile
+# Fairy-Stockfish UCI Engine WASM Makefile - FIX OUT OF BOUNDS MEMORY
 # ==============================================================================
 
 EXE = ../tests/js/fairy-stockfish.js
@@ -18,13 +18,16 @@ else
 endif
 
 CXXFLAGS += -DNNUE_EMBEDDING_OFF -pthread -std=c++17 -Wall
-CXXFLAGS += -s ASYNCIFY=1 -s ASYNCIFY_STACK_SIZE=65536
 CXXFLAGS += --embed-file variants.ini@/variants.ini
 
-# CÁC CỜ CHO UCI ENGINE
 LDFLAGS += -pthread -s PTHREAD_POOL_SIZE=4
 LDFLAGS += -s WASM=1 \
            -s ALLOW_MEMORY_GROWTH=1 \
+           -s INITIAL_MEMORY=268435456 \
+           -s STACK_SIZE=2097152 \
+           -s DEFAULT_PTHREAD_STACK_SIZE=2097152 \
+           -s ASYNCIFY=1 \
+           -s ASYNCIFY_STACK_SIZE=262144 \
            -s MODULARIZE=1 \
            -s EXPORT_NAME="Stockfish" \
            -s EXPORTED_FUNCTIONS="['_main']" \
@@ -46,8 +49,9 @@ ifeq ($(optimize),yes)
 	CXXFLAGS += -O3
 endif
 
+# Bắt buộc cho Alice Chess (Bàn cờ đôi 128 ô)
 ifneq ($(largeboards),no)
-	CXXFLAGS += -DLARGEBOARDS -DPRECOMPUTED_MAGICS -s TOTAL_MEMORY=64MB -s WASM_MEM_MAX=1GB
+	CXXFLAGS += -DLARGEBOARDS -DPRECOMPUTED_MAGICS -s WASM_MEM_MAX=2GB
 endif
 
 ifneq ($(all),no)
@@ -57,7 +61,7 @@ endif
 .PHONY: clean build
 
 clean:
-	@rm -f $(EXE) $(EXE:.js=.wasm) 2>nul || exit 0
+	@rm -f $(EXE) $(EXE:.js=.wasm) $(EXE:.js=.worker.js) 2>nul || exit 0
 
 build:
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o $(EXE)
