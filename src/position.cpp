@@ -1884,13 +1884,11 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       }
 
       if (var->aliceTeleportation) {
-          Piece pc = piece_on(to);
-          remove_piece(to);            
-          put_piece(pc, Square(int(to) ^ 64));
+            remove_piece(from);
+            put_piece(pc, Square(int(to) ^ 64));
+        } else {
+            move_piece(from, to);
         }
-       else {
-      move_piece(from, to);        // Standard movement
-  }
   }
 
   // If the moving piece is a pawn do some special extra work
@@ -2335,10 +2333,11 @@ void Position::undo_move(Move m) {
           // ------------------------
       }
       else if (var->aliceTeleportation) {
-      Piece pc = piece_on(Square(int(to) ^ 64));
-        remove_piece(Square(int(to) ^ 64));
-      remove_piece(Square(int(to) ^ 64));        // Put it back on its starting square on Board A
-      } 
+            Square dest = Square(int(to) ^ 64);
+            Piece p = piece_on(dest);
+            remove_piece(dest);
+            put_piece(p, from);
+        }
       else {move_piece(to, from);  // Put the piece back at the source square
     }
 

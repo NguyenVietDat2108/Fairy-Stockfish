@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <title>Test Fairy-Stockfish WASM Multi-Threading</title>
+  <!-- Service Worker kích hoạt SharedArrayBuffer nếu server chưa có header -->
+  <script src="coi-serviceworker.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: #121212; color: #eee; padding: 20px; }
+    h2 { margin-top: 0; color: #38bdf8; }
+    #status { padding: 10px; border-radius: 6px; font-weight: bold; margin-bottom: 12px; background: #1e293b; color: #38bdf8; }
+    #log { background: #0f172a; border: 1px solid #334155; color: #4ade80; padding: 15px; height: 500px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; border-radius: 6px; }
+    .btn-bar { margin-bottom: 12px; }
+    button { background: #2563eb; color: #fff; border: none; padding: 8px 14px; margin-right: 8px; border-radius: 4px; cursor: pointer; font-weight: 500; }
+    button:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <h2>Fairy-Stockfish WASM Test Console</h2>
+  <div id="status">Đang kiểm tra bảo mật trình duyệt...</div>
+
+  <div class="btn-bar">
+    <button onclick="send('uci')">Gửi UCI</button>
+    <button onclick="send('isready')">Gửi ISREADY</button>
+    <button onclick="testAlice()">Test Alice Chess</button>
+    <button onclick="testSpell()">Test Spell Chess</button>
+    <button onclick="send('stop')">Stop</button>
+  </div>
+
+  <pre id="log"></pre>
+
+  <script>
+    const logBox = document.getElementById('log');
+    const statusBox = document.getElementById('status');
+
+    function log(msg) {
+      logBox.textContent += msg + '\n';
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // 1. Khởi tạo hàng đợi ở TẤT CẢ các scope toàn cục
+    window.cmd_queue = [];
+    self.cmd_queue = window.cmd_queue;
+    window.engineInstance = null;
+
+    function send(cmd) {
+      log(">>> " + cmd);
+
+      // Cổng 1: Đẩy vào cmd_queue (cả window, self và instance)
+      window.cmd_queue.push(cmd);
+      if (window.engineInstance) {
+        if (window.engineInstance.cmd_queue) {
+          window.engineInstance.cmd_queue.push(cmd);
+        }
+
+        // Cổng 2: Gọi qua postMessage (nếu instance có)
+        if (typeof window.engineInstance.postMessage === 'function') {
+          window.engineInstance.postMessage(cmd);
+        }
+
+        // Cổng 3: Gọi qua hàm uci() trực tiếp
+        if (typeof window.engineInstance.uci === 'function') {
+          window.engineInstance.uci(cmd);
+        }
+
+        // Cổng 4: Gọi qua ccall/cwrap của Emscripten
+        if (typeof window.engineInstance.ccall === 'function') {
+          try {
+            window.engineInstance.ccall('push_cmd', null, ['string'], [cmd]);
+          } catch(e) {}
+        }
+      }
+    }
+    window.send = send;
+
+    // 2. Định nghĩa hàm test Alice và Spell
+    function testAlice() {
+      log("\n--- BẮT ĐẦU TEST ALICE CHESS ---");
+      send("setoption name UCI_Variant value alice");
+      send("isready");
+      send("position startpos moves e2e4");
+      send("go depth 6");
+    }
+    window.testAlice = testAlice;
+
+    function testSpell() {
+      log("\n--- BẮT ĐẦU TEST SPELL CHESS ---");
+      send("setoption name UCI_Variant value spell");
+      send("isready");
+      send("position startpos");
+      send("go depth 6");
+    }
+    window.testSpell = testSpell;
+
+    // 3. Kiểm tra môi trường Cross-Origin Isolation
+    if (!window.crossOriginIsolated) {
+      statusBox.textContent = "⏳ Đang kích hoạt COOP/COEP... Sẽ tự reload";
+      log("[COI] Đang chờ Service Worker kích hoạt Cross-Origin-Isolation...");
+    } else {
+      statusBox.textContent = "Đang nạp script...";
+
+      const script = document.createElement('script');
+      script.src = './fairy-stockfish.js';
+
+      script.onload = () => {
+        log("Tải file js xong. Đang khởi tạo Stockfish()...");
+
+        // Khởi tạo hàng đợi lệnh sẵn trong Module
+        const myModule = {
+          locateFile: (path) => path,
+          print: (text) => log("[ENGINE]: " + text),
+          printErr: (text) => {
+            if (text && !text.includes("Blocking on the main thread")) {
+              log("[ENGINE ERR]: " + text);
+            }
+          },
+          cmd_queue: window.cmd_queue
+        };
+
+        const factory = window.Stockfish || window.FairyStockfish || window.Module;
+
+        if (typeof factory === 'function') {
+          factory(myModule).then((instance) => {
+            window.engineInstance = instance;
+            statusBox.textContent = "🚀 Engine đã nạp! Xem log bên dưới:";
+            log("=== INSTANCE RESOLVED ===");
+
+            // Liệt kê các hàm có trong instance để biết chính xác API
+            const funcs = Object.keys(instance).filter(k => typeof instance[k] === 'function');
+            log("Các hàm có trong instance: " + funcs.join(', '));
+
+            // Bắt đầu gửi lệnh kiểm tra
+            setTimeout(() => { send("uci"); }, 200);
+            setTimeout(() => { send("isready"); }, 500);
+          }).catch(err => {
+            log("[ERROR] " + err);
+          });
+        }
+      };
+
+      script.onerror = () => {
+        statusBox.textContent = "❌ Không tìm thấy file fairy-stockfish.js!";
+        log("[ERROR] Lỗi 404 fairy-stockfish.js");
+      };
+
+      document.body.appendChild(script);
+    }
+  </script>
+</body>
+</html>
