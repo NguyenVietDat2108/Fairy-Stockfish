@@ -300,6 +300,20 @@ namespace {
         v->promotionPieceTypes[BLACK] = piece_set(AMAZON) | ROOK | BISHOP | KNIGHT;
         return v;
     }
+    // Georgian chess
+    // Traditional Georgian rules:
+    // - Queen moves as an Amazon (Queen + Knight)
+    // - No castling
+    // - No en passant
+    // Also see Murray p. 378
+    Variant* georgian_variant() {
+        Variant* v = amazon_variant()->init();
+        v->startFen = "rnbakbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBAKBNR w - - 0 1";
+        v->castling = false;
+        v->enPassantRegion[WHITE] = v->enPassantRegion[BLACK] = 0; // no en passant
+        v->nnueAlias = "amazon";
+        return v;
+    }
     // Nightrider chess
     // Knights are replaced by nightriders.
     // https://en.wikipedia.org/wiki/Nightrider_(chess)
@@ -907,16 +921,19 @@ namespace {
         v->add_piece(GOLD, 'h');
         v->add_piece(FERS, 'e');
         v->add_piece(WAZIR, 'g');
-        v->add_piece(KING, 'l');
+        v->add_piece(COMMONER, 'l');
         v->startFen = "gle/1c1/1C1/ELG[-] w 0 1";
         v->promotionRegion[WHITE] = Rank4BB;
         v->promotionRegion[BLACK] = Rank1BB;
         v->mandatoryPiecePromotion = true;
         v->immobilityIllegal = false;
         v->shogiPawnDropMateIllegal = false;
-        v->flagPiece[WHITE] = v->flagPiece[BLACK] = KING;
+        v->extinctionValue = -VALUE_MATE;
+        v->extinctionPieceTypes = piece_set(COMMONER);
+        v->flagPiece[WHITE] = v->flagPiece[BLACK] = COMMONER;
         v->flagRegion[WHITE] = Rank4BB;
         v->flagRegion[BLACK] = Rank1BB;
+        v->flagPieceSafe = true;
         v->dropNoDoubled = NO_PIECE_TYPE;
         v->nFoldValue = VALUE_DRAW;
         v->perpetualCheckIllegal = false;
@@ -1508,6 +1525,8 @@ namespace {
         v->flagRegion[WHITE] = make_bitboard(SQ_E5);
         v->flagRegion[BLACK] = make_bitboard(SQ_E5);
         v->flagMove = true;
+        // we could remove the useless extra move when the flag piece can not be captured
+        // v->flagPieceSafe = true;
         return v;
     }
     // Courier chess
@@ -1871,6 +1890,7 @@ void VariantMap::init() {
     add("shatranj", shatranj_variant());
     add("chaturanga", chaturanga_variant());
     add("amazon", amazon_variant());
+    add("georgian", georgian_variant());
     add("nightrider", nightrider_variant());
     add("grasshopper", grasshopper_variant());
     add("hoppelpoppel", hoppelpoppel_variant());
